@@ -23,6 +23,7 @@ const ProductCard: React.FC<ProductCardProps> = ({
 }) => {
   const [quantity, setQuantity] = useState(1);
   const [isAdding, setIsAdding] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
   const { addNotification } = useNotifications();
   
   const isLowStock = product.stock > 0 && product.stock <= 5;
@@ -41,22 +42,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
     setIsAdding(true);
     try {
       await onAddToCart(product._id, quantity);
-      addNotification(`Added ${quantity} ${product.name} to cart`, 'success');
-      
-      // If adding to cart makes the product low in stock or out of stock, emit socket event
-      if ((product.stock - quantity) <= 5 && product.stock > 5) {
-        socketService.sendLowStockAlert({
-          productId: product._id,
-          productName: product.name,
-          currentStock: product.stock - quantity,
-          threshold: 5
-        });
-      } else if ((product.stock - quantity) === 0) {
-        socketService.sendOutOfStockAlert({
-          productId: product._id,
-          productName: product.name
-        });
-      }
       
       // Reset quantity
       setQuantity(1);
@@ -65,7 +50,6 @@ const ProductCard: React.FC<ProductCardProps> = ({
       refreshProducts();
     } catch (error) {
       console.error('Error adding to cart:', error);
-      addNotification('Failed to add to cart', 'error');
     } finally {
       setIsAdding(false);
     }
@@ -80,17 +64,15 @@ const ProductCard: React.FC<ProductCardProps> = ({
   };
   
   const handleToggleSubscribe = async () => {
+    setIsSubscribing(true);
     try {
       await onToggleSubscribe(product._id, !product.subscribed);
-      addNotification(
-        product.subscribed 
-          ? `Unsubscribed from ${product.name} alerts` 
-          : `Subscribed to ${product.name} alerts`,
-        'info'
-      );
+      // Note: Notifications are handled in the parent component now
     } catch (error) {
       console.error('Error toggling subscription:', error);
-      addNotification('Failed to update subscription', 'error');
+      // The parent component will handle the notification
+    } finally {
+      setIsSubscribing(false);
     }
   };
 
@@ -158,10 +140,12 @@ const ProductCard: React.FC<ProductCardProps> = ({
           product.subscribed
             ? 'bg-blue-100 text-blue-600'
             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-        }`}
-        disabled={isAdding}
+        } ${isSubscribing ? 'opacity-75 cursor-wait' : ''}`}
+        disabled={isAdding || isSubscribing}
       >
-        {product.subscribed ? (
+        {isSubscribing ? (
+          'Processing...'
+        ) : product.subscribed ? (
           <>
             <BellOff className="h-4 w-4 mr-1" />
             Unsubscribe
@@ -183,16 +167,16 @@ const ProductCard: React.FC<ProductCardProps> = ({
           value={quantity}
           onChange={handleQuantityChange}
           className="w-12 border border-gray-300 rounded-md px-1 py-1 text-sm"
-          disabled={isOutOfStock || isAdding}
+          disabled={isOutOfStock || isAdding || isSubscribing}
         />
         <button
           onClick={handleAddToCart}
           className={`flex-1 py-1 px-3 rounded-lg text-white text-sm flex items-center justify-center ${
-            isOutOfStock || isAdding
+            isOutOfStock || isAdding || isSubscribing
               ? 'bg-gray-300 cursor-not-allowed'
               : 'bg-blue-600 hover:bg-blue-700'
           }`}
-          disabled={isOutOfStock || isAdding}
+          disabled={isOutOfStock || isAdding || isSubscribing}
         >
           <ShoppingCart className="h-4 w-4 mr-1" />
           {isAdding ? 'Adding...' : 'Add to Cart'}

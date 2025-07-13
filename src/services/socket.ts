@@ -63,14 +63,40 @@ class SocketService {
 
   // Send low stock alert
   sendLowStockAlert(productData: any) {
-    if (!this.socket) return;
-    this.socket.emit('low_stock_alert', productData);
+    if (!this.socket) {
+      console.error('Socket not connected. Reconnecting...');
+      this.connect();
+    }
+    
+    try {
+      this.socket?.emit('low_stock_alert', {
+        ...productData,
+        timestamp: Date.now()
+      });
+      return true;
+    } catch (error) {
+      console.error('Error sending low stock alert:', error);
+      return false;
+    }
   }
 
   // Send out of stock alert
   sendOutOfStockAlert(productData: any) {
-    if (!this.socket) return;
-    this.socket.emit('out_of_stock_alert', productData);
+    if (!this.socket) {
+      console.error('Socket not connected. Reconnecting...');
+      this.connect();
+    }
+    
+    try {
+      this.socket?.emit('out_of_stock_alert', {
+        ...productData,
+        timestamp: Date.now()
+      });
+      return true;
+    } catch (error) {
+      console.error('Error sending out of stock alert:', error);
+      return false;
+    }
   }
 
   // Send restock request

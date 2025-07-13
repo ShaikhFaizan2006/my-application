@@ -1,22 +1,27 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Bell, X, CheckCircle, Info, AlertTriangle, AlertCircle } from 'lucide-react';
 import { useNotifications, NotificationType } from '@/context/NotificationContext';
 
 const NotificationCenter: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'alerts' | 'messages'>('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'alerts'>('all');
   
   const {
     notifications,
     stockAlerts,
-    messages,
     unreadCount,
     markNotificationAsRead,
-    markStockAlertAsRead,
-    markMessageAsRead
+    markStockAlertAsRead
   } = useNotifications();
+
+  // Auto-switch to alerts tab if there are unread stock alerts
+  useEffect(() => {
+    if (stockAlerts.filter(a => !a.read).length > 0 && isOpen) {
+      setActiveTab('alerts');
+    }
+  }, [stockAlerts, isOpen]);
 
   const getIcon = (type: NotificationType) => {
     switch (type) {
@@ -41,85 +46,76 @@ const NotificationCenter: React.FC = () => {
   const getDisplayItems = () => {
     switch (activeTab) {
       case 'alerts':
-        return stockAlerts.map(alert => (
-          <div 
-            key={`${alert.productId}-${alert.timestamp}`}
-            className={`p-3 border-b ${alert.read ? 'bg-gray-50' : 'bg-blue-50'}`}
-            onClick={() => markStockAlertAsRead(alert.productId)}
-          >
-            <div className="flex justify-between items-start">
-              <div className="flex gap-2 items-start">
-                {alert.type === 'low_stock' 
-                  ? <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5" />
-                  : <AlertCircle className="h-4 w-4 text-red-500 mt-0.5" />
-                }
-                <div>
-                  <p className="text-sm font-medium">
-                    {alert.type === 'low_stock' 
-                      ? `Low Stock: ${alert.productName}` 
-                      : `Out of Stock: ${alert.productName}`
-                    }
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {alert.type === 'low_stock' 
-                      ? `Current: ${alert.currentStock}, Threshold: ${alert.threshold}` 
-                      : 'Stock depleted'
-                    }
-                  </p>
+        return stockAlerts.length > 0 ? (
+          stockAlerts.map(alert => (
+            <div 
+              key={`${alert.productId}-${alert.timestamp}`}
+              className={`p-3 border-b ${alert.read ? 'bg-gray-50' : 'bg-blue-50'}`}
+              onClick={() => markStockAlertAsRead(alert.productId)}
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex gap-2 items-start">
+                  {alert.type === 'low_stock' 
+                    ? <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5" />
+                    : <AlertCircle className="h-4 w-4 text-red-500 mt-0.5" />
+                  }
+                  <div>
+                    <p className="text-sm font-medium">
+                      {alert.type === 'low_stock' 
+                        ? `Low Stock: ${alert.productName}` 
+                        : `Out of Stock: ${alert.productName}`
+                      }
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {alert.type === 'low_stock' 
+                        ? `Current: ${alert.currentStock}, Threshold: ${alert.threshold || 5}` 
+                        : 'Stock depleted'
+                      }
+                    </p>
+                  </div>
                 </div>
+                <span className="text-xs text-gray-400">{formatTime(alert.timestamp)}</span>
               </div>
-              <span className="text-xs text-gray-400">{formatTime(alert.timestamp)}</span>
             </div>
+          ))
+        ) : (
+          <div className="p-4 text-center text-gray-500 text-sm">
+            No stock alerts to display
           </div>
-        ));
-        
-      case 'messages':
-        return messages.map(message => (
-          <div 
-            key={message.id}
-            className={`p-3 border-b ${message.read ? 'bg-gray-50' : 'bg-blue-50'}`}
-            onClick={() => markMessageAsRead(message.id)}
-          >
-            <div className="flex justify-between items-start">
-              <div className="flex gap-2 items-start">
-                <Info className="h-4 w-4 text-blue-500 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium">From: {message.senderName}</p>
-                  <p className="text-xs">{message.message}</p>
-                </div>
-              </div>
-              <span className="text-xs text-gray-400">{formatTime(message.timestamp)}</span>
-            </div>
-          </div>
-        ));
+        );
         
       case 'all':
       default:
-        return notifications.map(notification => (
-          <div 
-            key={notification.id}
-            className={`p-3 border-b ${notification.read ? 'bg-gray-50' : 'bg-blue-50'}`}
-            onClick={() => markNotificationAsRead(notification.id)}
-          >
-            <div className="flex justify-between items-start">
-              <div className="flex gap-2 items-start">
-                {getIcon(notification.type)}
-                <p className="text-sm">{notification.message}</p>
+        return notifications.length > 0 ? (
+          notifications.map(notification => (
+            <div 
+              key={notification.id}
+              className={`p-3 border-b ${notification.read ? 'bg-gray-50' : 'bg-blue-50'}`}
+              onClick={() => markNotificationAsRead(notification.id)}
+            >
+              <div className="flex justify-between items-start">
+                <div className="flex gap-2 items-start">
+                  {getIcon(notification.type)}
+                  <p className="text-sm">{notification.message}</p>
+                </div>
+                <span className="text-xs text-gray-400">{formatTime(notification.timestamp)}</span>
               </div>
-              <span className="text-xs text-gray-400">{formatTime(notification.timestamp)}</span>
             </div>
+          ))
+        ) : (
+          <div className="p-4 text-center text-gray-500 text-sm">
+            No notifications to display
           </div>
-        ));
+        );
     }
   };
-
-  const displayItems = getDisplayItems();
   
   return (
     <div className="relative">
       <button 
         className="relative p-2 rounded-full hover:bg-gray-100"
         onClick={() => setIsOpen(!isOpen)}
+        aria-label="Notifications"
       >
         <Bell className="h-5 w-5" />
         {unreadCount > 0 && (
@@ -151,22 +147,10 @@ const NotificationCenter: React.FC = () => {
             >
               Alerts {stockAlerts.filter(a => !a.read).length > 0 && `(${stockAlerts.filter(a => !a.read).length})`}
             </button>
-            <button
-              onClick={() => setActiveTab('messages')}
-              className={`flex-1 p-2 text-sm font-medium ${activeTab === 'messages' ? 'border-b-2 border-blue-500 text-blue-500' : 'text-gray-500'}`}
-            >
-              Messages {messages.filter(m => !m.read).length > 0 && `(${messages.filter(m => !m.read).length})`}
-            </button>
           </div>
           
           <div className="max-h-80 overflow-y-auto">
-            {displayItems.length > 0 ? (
-              displayItems
-            ) : (
-              <div className="p-4 text-center text-gray-500 text-sm">
-                No {activeTab === 'all' ? 'notifications' : activeTab} to display
-              </div>
-            )}
+            {getDisplayItems()}
           </div>
         </div>
       )}

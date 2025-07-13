@@ -28,14 +28,12 @@ export interface StockAlert {
 interface NotificationContextType {
   notifications: Notification[];
   stockAlerts: StockAlert[];
-  messages: any[];
   addNotification: (message: string, type: NotificationType, details?: any) => void;
+  addStockAlert: (alert: Omit<StockAlert, 'timestamp' | 'read'>) => void;
   markNotificationAsRead: (id: string) => void;
   markStockAlertAsRead: (id: string) => void;
-  markMessageAsRead: (id: string) => void;
   clearNotifications: () => void;
   clearStockAlerts: () => void;
-  clearMessages: () => void;
   unreadCount: number;
 }
 
@@ -44,12 +42,10 @@ const NotificationContext = createContext<NotificationContextType | undefined>(u
 export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [stockAlerts, setStockAlerts] = useState<StockAlert[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
 
   const unreadCount = 
     notifications.filter(n => !n.read).length + 
-    stockAlerts.filter(a => !a.read).length + 
-    messages.filter(m => !m.read).length;
+    stockAlerts.filter(a => !a.read).length;
 
   useEffect(() => {
     // Connect to socket service
@@ -59,43 +55,23 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     socketService.on('stock_alert', (data: any) => {
       const stockAlert: StockAlert = {
         ...data,
+        timestamp: Date.now(),
         read: false,
       };
       
-      setStockAlerts(prev => [stockAlert, ...prev]);
-      
-      // Also add as a notification
-      addNotification(
-        data.type === 'low_stock' 
-          ? `Low stock alert: ${data.productName} (${data.currentStock}/${data.threshold})`
-          : `Out of stock: ${data.productName}`,
-        'warning',
-        data
-      );
-    });
-
-    // Listen for direct messages
-    socketService.on('message', (data: any) => {
-      const newMessage = {
-        ...data,
-        id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        read: false,
-      };
-      
-      setMessages(prev => [newMessage, ...prev]);
-      
-      // Also add as a notification
-      addNotification(
-        `New message from ${data.senderName}`,
-        'info',
-        data
-      );
+      // Add to stock alerts
+      addStockAlert({
+        productId: data.productId,
+        productName: data.productName,
+        currentStock: data.currentStock,
+        threshold: data.threshold,
+        type: data.type
+      });
     });
 
     // Clean up on unmount
     return () => {
       socketService.off('stock_alert', () => {});
-      socketService.off('message', () => {});
     };
   }, []);
 
@@ -110,6 +86,34 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     };
 
     setNotifications(prev => [newNotification, ...prev]);
+  };
+
+  const addStockAlert = (alert: Omit<StockAlert, 'timestamp' | 'read'>) => {
+    const newAlert: StockAlert = {
+      ...alert,
+      timestamp: Date.now(),
+      read: false
+    };
+
+    // Check if we already have this alert to avoid duplicates
+    const exists = stockAlerts.some(a => 
+      a.productId === alert.productId && 
+      a.type === alert.type &&
+      a.currentStock === alert.currentStock
+    );
+
+    if (!exists) {
+      setStockAlerts(prev => [newAlert, ...prev]);
+      
+      // Also add as a notification
+      addNotification(
+        alert.type === 'low_stock' 
+          ? `Low stock alert: ${alert.productName} (${alert.currentStock}/${alert.threshold})`
+          : `Out of stock: ${alert.productName}`,
+        'warning',
+        alert
+      );
+    }
   };
 
   const markNotificationAsRead = (id: string) => {
@@ -128,14 +132,6 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     );
   };
 
-  const markMessageAsRead = (id: string) => {
-    setMessages(prev => 
-      prev.map(message => 
-        message.id === id ? { ...message, read: true } : message
-      )
-    );
-  };
-
   const clearNotifications = () => {
     setNotifications([]);
   };
@@ -144,23 +140,17 @@ export const NotificationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     setStockAlerts([]);
   };
 
-  const clearMessages = () => {
-    setMessages([]);
-  };
-
   return (
     <NotificationContext.Provider
       value={{
         notifications,
         stockAlerts,
-        messages,
         addNotification,
+        addStockAlert,
         markNotificationAsRead,
         markStockAlertAsRead,
-        markMessageAsRead,
         clearNotifications,
         clearStockAlerts,
-        clearMessages,
         unreadCount
       }}
     >

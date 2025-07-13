@@ -121,18 +121,51 @@ export const subscriptionService = {
   },
   
   subscribe: async (productId: string, notifyAt: number = 5) => {
-    const response = await api.post('/subscriptions', { productId, notifyAt });
-    return response.data;
+    try {
+      const response = await api.post('/subscriptions', { productId, notifyAt });
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Subscription error:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to subscribe'
+      };
+    }
   },
   
   updateSubscription: async (id: string, notifyAt: number) => {
-    const response = await api.put(`/subscriptions/${id}`, { notifyAt });
-    return response.data;
+    try {
+      const response = await api.put(`/subscriptions/${id}`, { notifyAt });
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Update subscription error:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to update subscription'
+      };
+    }
   },
   
   unsubscribe: async (id: string) => {
-    const response = await api.delete(`/subscriptions/${id}`);
-    return response.data;
+    try {
+      const response = await api.delete(`/subscriptions/${id}`);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Unsubscribe error:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to unsubscribe'
+      };
+    }
   }
 };
 
@@ -144,23 +177,77 @@ export const cartService = {
   },
   
   addToCart: async (productId: string, quantity: number = 1) => {
-    const response = await api.post('/cart', { productId, quantity });
-    return response.data;
+    try {
+      // Make sure quantity is a positive integer
+      const validQuantity = Math.max(1, Math.floor(Number(quantity)));
+      
+      const response = await api.post('/cart', { 
+        productId, 
+        quantity: validQuantity 
+      });
+      
+      return {
+        success: true,
+        data: response.data.data || response.data,
+        stockWarning: response.data.stockWarning || { isLowStock: false, isOutOfStock: false }
+      };
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      // Handle 400 error from server
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to add to cart',
+        stockWarning: { isLowStock: false, isOutOfStock: false }
+      };
+    }
   },
   
   updateCartItem: async (productId: string, quantity: number) => {
-    const response = await api.put(`/cart/${productId}`, { quantity });
-    return response.data;
+    try {
+      const response = await api.put(`/cart/${productId}`, { quantity });
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error updating cart:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to update cart'
+      };
+    }
   },
   
   removeCartItem: async (productId: string) => {
-    const response = await api.delete(`/cart/${productId}`);
-    return response.data;
+    try {
+      const response = await api.delete(`/cart/${productId}`);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error removing from cart:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to remove item from cart'
+      };
+    }
   },
   
   clearCart: async () => {
-    const response = await api.delete('/cart');
-    return response.data;
+    try {
+      const response = await api.delete('/cart');
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error clearing cart:', error);
+      return {
+        success: false,
+        error: error.response?.data?.message || 'Failed to clear cart'
+      };
+    }
   }
 };
 

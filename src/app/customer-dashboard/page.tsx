@@ -22,7 +22,7 @@ const CustomerDashboard: React.FC = () => {
   const [categories, setCategories] = useState<string[]>(['all']);
   const [loading, setLoading] = useState<boolean>(true);
   
-  const { addNotification } = useNotifications();
+  const { addNotification, addStockAlert } = useNotifications();
 
   // Fetch products
   const fetchProducts = async () => {
@@ -133,45 +133,71 @@ const CustomerDashboard: React.FC = () => {
     try {
       const response = await cartService.addToCart(productId, quantity);
       if (response.success) {
-        // Update product stock
-        setProducts(prevProducts => 
-          prevProducts.map(product => 
-            product._id === productId 
-              ? { ...product, stock: product.stock - quantity }
-              : product
-          )
-        );
+        // Show success notification
+        addNotification(`Successfully added item to cart`, 'success');
         
         // Update cart
         await fetchCart();
         
-        // Notify stockers and admins about potential stock issues
-        const product = products.find(p => p._id === productId);
-        const newStock = product.stock - quantity;
+        // Refresh products to get updated stock
+        await fetchProducts();
         
-        if (newStock <= product.lowStockThreshold && newStock > 0) {
-          socketService.sendLowStockAlert({
+        // Get the updated product 
+        const updatedProduct = products.find(p => p._id === productId);
+        if (updatedProduct) {
+          // Check if the stock is low or out
+          if (response.stockWarning?.isLowStock) {
+            // Product is now low in stock
+            const stockAlert = {
+              productId,
+              productName: updatedProduct.name,
+              currentStock: updatedProduct.stock,
+              threshold: 5,
+              type: 'low_stock' as const
+            };
+            
+            // Add to stock alerts
+            addStockAlert(stockAlert);
+            
+            // Send socket alert
+            socketService.sendLowStockAlert({
+              productId,
+              productName: updatedProduct.name,
+              currentStock: updatedProduct.stock,
+              threshold: 5
+            });
+          } else if (response.stockWarning?.isOutOfStock) {
+            // Product is now out of stock
+            const stockAlert = {
+              productId,
+              productName: updatedProduct.name,
+              currentStock: 0,
+              type: 'out_of_stock' as const
+            };
+            
+            // Add to stock alerts
+            addStockAlert(stockAlert);
+            
+            // Send socket alert
+            socketService.sendOutOfStockAlert({
+              productId,
+              productName: updatedProduct.name
+            });
+          }
+          
+          // Notify about product update
+          socketService.notifyProductUpdate({
             productId,
-            productName: product.name,
-            currentStock: newStock,
-            threshold: product.lowStockThreshold
-          });
-        } else if (newStock === 0) {
-          socketService.sendOutOfStockAlert({
-            productId,
-            productName: product.name
+            updates: { stock: updatedProduct.stock }
           });
         }
-        
-        // Notify about product update
-        socketService.notifyProductUpdate({
-          productId,
-          updates: { stock: newStock }
-        });
+      } else {
+        // Show error notification
+        addNotification(response.error || 'Failed to add to cart', 'error');
       }
     } catch (error) {
       console.error('Error adding to cart:', error);
-      throw error;
+      addNotification('Failed to add to cart. Please try again.', 'error');
     }
   };
   
@@ -205,6 +231,9 @@ const CustomerDashboard: React.FC = () => {
             )
           );
           await fetchSubscriptions();
+          addNotification(`Successfully subscribed to ${products.find(p => p._id === productId)?.name} alerts`, 'success');
+        } else {
+          addNotification(`Failed to subscribe: ${response.error}`, 'error');
         }
       } else {
         // Find subscription ID
@@ -220,12 +249,17 @@ const CustomerDashboard: React.FC = () => {
               )
             );
             await fetchSubscriptions();
+            addNotification(`Successfully unsubscribed from ${products.find(p => p._id === productId)?.name} alerts`, 'success');
+          } else {
+            addNotification(`Failed to unsubscribe: ${response.error}`, 'error');
           }
+        } else {
+          addNotification('Could not find subscription to remove', 'error');
         }
       }
     } catch (error) {
       console.error('Error toggling subscription:', error);
-      throw error;
+      addNotification('Failed to update subscription. Please try again later.', 'error');
     }
   };
   

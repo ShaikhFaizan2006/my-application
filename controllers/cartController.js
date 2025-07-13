@@ -32,7 +32,21 @@ exports.getCart = async (req, res) => {
 // @access  Private
 exports.addToCart = async (req, res) => {
   try {
-    const { productId, quantity = 1 } = req.body;
+    let { productId, quantity } = req.body;
+    
+    // Validate inputs
+    if (!productId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Product ID is required'
+      });
+    }
+    
+    // Ensure quantity is a valid number
+    quantity = Number(quantity) || 1;
+    if (quantity <= 0) {
+      quantity = 1;
+    }
     
     // Check if product exists
     const product = await Product.findById(productId);
@@ -62,7 +76,7 @@ exports.addToCart = async (req, res) => {
     } else {
       // Check if item is already in cart
       const itemIndex = cart.items.findIndex(
-        item => item.product.toString() === productId
+        item => item.product && item.product.toString() === productId
       );
       
       if (itemIndex > -1) {
@@ -88,16 +102,34 @@ exports.addToCart = async (req, res) => {
       await cart.save();
     }
     
+    // Update product stock
+    product.stock -= quantity;
+    await product.save();
+    
+    // Check if product is now low in stock or out of stock
+    const isLowStock = product.stock > 0 && product.stock <= 5;
+    const isOutOfStock = product.stock === 0;
+    
     // Return the cart with populated product information
     cart = await Cart.findOne({ user: req.user.id })
       .populate('items.product', 'name category price stock image');
     
     res.status(200).json({
       success: true,
-      data: cart
+      data: cart,
+      stockWarning: {
+        isLowStock,
+        isOutOfStock
+      }
     });
   } catch (error) {
     console.error(error);
+    if (error.name === 'CastError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid product ID format'
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Server error'
