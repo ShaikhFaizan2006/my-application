@@ -1,16 +1,18 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { User, ShoppingCart, Bell, Package, LogOut, AlertTriangle, Search, Filter, X } from 'lucide-react';
+import { User, ShoppingCart, Bell, Package, LogOut, AlertTriangle, Search, Filter, X, ClipboardList } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { productService, subscriptionService, cartService, authService } from '@/services/api';
+import { productService, subscriptionService, cartService, authService, orderService } from '@/services/api';
 import socketService from '@/services/socket';
 import { useNotifications } from '@/context/NotificationContext';
 import ProductCard from './components/ProductCard';
+import OrderCard from './components/OrderCard';
+import OrderTracking from './components/OrderTracking';
 import NotificationCenter from '@/components/NotificationCenter';
 
 const CustomerDashboard: React.FC = () => {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'products' | 'subscriptions' | 'alerts' | 'lessStock' | 'cart'>('products');
+  const [activeTab, setActiveTab] = useState<'products' | 'subscriptions' | 'alerts' | 'lessStock' | 'cart' | 'orders'>('products');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'price' | 'stock'>('name');
@@ -19,8 +21,11 @@ const CustomerDashboard: React.FC = () => {
   const [products, setProducts] = useState<any[]>([]);
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [cart, setCart] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [categories, setCategories] = useState<string[]>(['all']);
   const [loading, setLoading] = useState<boolean>(true);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [showOrderTracking, setShowOrderTracking] = useState(false);
   
   const { addNotification, addStockAlert } = useNotifications();
 
@@ -71,12 +76,25 @@ const CustomerDashboard: React.FC = () => {
     }
   };
   
+  // Fetch orders
+  const fetchOrders = async () => {
+    try {
+      const response = await orderService.getAllOrders();
+      if (response.success) {
+        setOrders(response.data);
+      }
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+    }
+  };
+  
   // Initialize data
   useEffect(() => {
     const initData = async () => {
       await fetchSubscriptions();
       await fetchProducts();
       await fetchCart();
+      await fetchOrders();
     };
     
     initData();
@@ -93,9 +111,19 @@ const CustomerDashboard: React.FC = () => {
       );
     });
     
+    // Listen for order updates
+    socketService.on('order_update', (data) => {
+      setOrders(prevOrders => 
+        prevOrders.map(order => 
+          order._id === data.orderId ? { ...order, ...data.updates } : order
+        )
+      );
+    });
+    
     return () => {
       // Clean up
       socketService.off('product_update', () => {});
+      socketService.off('order_update', () => {});
     };
   }, []);
   
@@ -253,47 +281,64 @@ const CustomerDashboard: React.FC = () => {
           } else {
             addNotification(`Failed to unsubscribe: ${response.error}`, 'error');
           }
-        } else {
-          addNotification('Could not find subscription to remove', 'error');
         }
       }
     } catch (error) {
       console.error('Error toggling subscription:', error);
-      addNotification('Failed to update subscription. Please try again later.', 'error');
+      addNotification('Failed to update subscription. Please try again.', 'error');
     }
   };
   
   // Handle remove from cart
   const handleRemoveFromCart = async (productId: string) => {
     try {
-      const response = await cartService.removeCartItem(productId);
+      const response = await cartService.removeFromCart(productId);
       if (response.success) {
-        // Get item from cart to know quantity
-        const cartItem = cart.find(item => item.product._id === productId);
-        const quantity = cartItem ? cartItem.quantity : 0;
-        
-        // Update product stock
-        setProducts(prevProducts => 
-          prevProducts.map(product => 
-            product._id === productId 
-              ? { ...product, stock: product.stock + quantity }
-              : product
-          )
-        );
-        
         // Update cart
         await fetchCart();
-        
-        // Notify about product update
-        const product = products.find(p => p._id === productId);
-        socketService.notifyProductUpdate({
-          productId,
-          updates: { stock: product.stock + quantity }
-        });
+        addNotification('Item removed from cart', 'success');
+      } else {
+        addNotification(response.error || 'Failed to remove from cart', 'error');
       }
     } catch (error) {
       console.error('Error removing from cart:', error);
-      addNotification('Failed to remove item from cart', 'error');
+      addNotification('Failed to remove from cart. Please try again.', 'error');
+    }
+  };
+  
+  // Handle checkout
+  const handleCheckout = async () => {
+    try {
+      // For this demo, we'll just create a mock order from the cart
+      const demoAddress = {
+        street: 'House No: 1234, 2nd Floor, Sector 18',
+        city: 'Gurugram',
+        state: 'Haryana',
+        zipCode: '122022',
+        country: 'India'
+      };
+      
+      const response = await orderService.createOrder({ deliveryAddress: demoAddress });
+      if (response.success) {
+        addNotification('Order placed successfully!', 'success');
+        await fetchCart();
+        await fetchOrders();
+        setActiveTab('orders');
+      } else {
+        addNotification(response.error || 'Failed to place order', 'error');
+      }
+    } catch (error) {
+      console.error('Error during checkout:', error);
+      addNotification('Failed to place order. Please try again.', 'error');
+    }
+  };
+  
+  // Handle viewing order details
+  const handleViewOrderDetails = (orderId: string) => {
+    const order = orders.find(o => o._id === orderId);
+    if (order) {
+      setSelectedOrder(order);
+      setShowOrderTracking(true);
     }
   };
   
@@ -355,6 +400,17 @@ const CustomerDashboard: React.FC = () => {
                 >
                   <Package className="h-5 w-5" />
                   <span>Browse Products</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('orders')}
+                  className={`w-full flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    activeTab === 'orders'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <ClipboardList className="h-5 w-5" />
+                  <span>My Orders ({orders.length})</span>
                 </button>
                 <button
                   onClick={() => setActiveTab('subscriptions')}
@@ -506,6 +562,34 @@ const CustomerDashboard: React.FC = () => {
               </div>
             )}
 
+            {/* Orders Tab */}
+            {activeTab === 'orders' && (
+              <div className="bg-white rounded-lg shadow-sm p-4">
+                <h2 className="text-lg font-semibold text-gray-900 mb-4">My Orders</h2>
+                {orders.length > 0 ? (
+                  <div className="space-y-4">
+                    {orders.map((order) => (
+                      <OrderCard
+                        key={order._id}
+                        order={order}
+                        onViewDetails={handleViewOrderDetails}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-8">
+                    <p className="text-gray-500">You haven't placed any orders yet.</p>
+                    <button
+                      onClick={() => setActiveTab('products')}
+                      className="mt-3 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700"
+                    >
+                      Browse Products
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Subscriptions Tab */}
             {activeTab === 'subscriptions' && (
               <div className="bg-white rounded-lg shadow-sm p-4">
@@ -600,6 +684,7 @@ const CustomerDashboard: React.FC = () => {
                         <span className="font-bold text-lg">${cartTotal.toFixed(2)}</span>
                       </div>
                       <button
+                        onClick={handleCheckout}
                         className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-blue-700 w-full"
                       >
                         Proceed to Checkout
@@ -683,6 +768,19 @@ const CustomerDashboard: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Order Tracking Modal */}
+      {showOrderTracking && selectedOrder && (
+        <OrderTracking
+          orderNumber={selectedOrder.orderNumber}
+          totalAmount={selectedOrder.totalAmount}
+          estimatedDelivery={selectedOrder.estimatedDelivery}
+          statusHistory={selectedOrder.statusHistory}
+          currentStatus={selectedOrder.currentStatus}
+          deliveryAddress={selectedOrder.deliveryAddress}
+          onClose={() => setShowOrderTracking(false)}
+        />
+      )}
     </div>
   );
 };

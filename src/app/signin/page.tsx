@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Package, Mail, Lock, User, ArrowLeft, ChevronDown } from 'lucide-react';
+import { authService } from '@/services/api';
 
 const TERMS_OF_SERVICE_URL = '/terms-of-service';
 const PRIVACY_POLICY_URL = '/privacy-policy';
@@ -89,7 +90,6 @@ const StockAlertProAuth = () => {
   const handleSubmit = async () => {
     if (validateForm()) {
       try {
-        // Use actual authentication logic with the API
         if (isSignUp) {
           const userData = {
             fullName: formData.fullName,
@@ -98,20 +98,10 @@ const StockAlertProAuth = () => {
             role: selectedRole.toLowerCase()
           };
           
-          // Make API request to register endpoint
-          const response = await fetch('http://localhost:5000/api/auth/register', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(userData)
-          });
-          
-          const data = await response.json();
+          // Use authService instead of direct fetch
+          const data = await authService.register(userData);
           
           if (data.success) {
-            // Save token and user in localStorage
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-            
             alert('Account created successfully!');
             
             // Navigate based on role
@@ -130,19 +120,17 @@ const StockAlertProAuth = () => {
             setErrors(prev => ({ ...prev, general: data.message || 'Registration failed' }));
           }
         } else {
-          // Make API request to login endpoint
-          const response = await fetch('http://localhost:5000/api/auth/login', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email: formData.email, password: formData.password })
-          });
+          // Use authService instead of direct fetch
+          setErrors(prev => ({ ...prev, general: 'Authenticating...' }));
           
-          const data = await response.json();
+          // Log to console before the API call
+          console.log(`Attempting login with email: ${formData.email}`);
+          
+          const data = await authService.login(formData.email, formData.password);
           
           if (data.success) {
-            // Save token and user in localStorage
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
+            // Log to console after a successful API call
+            console.log('Login successful:', data);
             
             // Check if user role matches selected role
             if (data.user.role !== selectedRole.toLowerCase()) {
@@ -150,25 +138,53 @@ const StockAlertProAuth = () => {
               return;
             }
             
+            // Clear the error before navigation
+            setErrors({});
+            
             // Navigate based on selected role
-            switch(selectedRole) {
-              case 'Customer':
+            switch(selectedRole.toLowerCase()) {
+              case 'customer':
                 router.push('/customer-dashboard');
                 break;
-              case 'Stocker':
+              case 'stocker':
                 router.push('/stocker-dashboard');
                 break;
-              case 'Admin':
+              case 'admin':
                 router.push('/admin-dashboard');
                 break;
             }
           } else {
-            setErrors(prev => ({ ...prev, general: data.message || 'Invalid credentials' }));
+            // Enhanced error handling
+            let errorMessage = data.message || 'Authentication failed';
+            
+            // Check for specific error patterns
+            if (errorMessage.includes('Network error') || errorMessage.includes('Failed to fetch')) {
+              errorMessage = 'Server connection error. Please ensure the backend server is running.';
+            } else if (errorMessage.includes('timeout')) {
+              errorMessage = 'Connection timed out. Please try again.';
+            } else if (errorMessage === 'Invalid credentials') {
+              errorMessage = 'Invalid email or password. Please check your credentials and try again.';
+            }
+            
+            setErrors(prev => ({ ...prev, general: errorMessage }));
+            
+            // Log to console when authentication fails
+            console.error('Authentication failed:', data.message);
           }
         }
       } catch (error) {
         console.error('Authentication error:', error);
-        setErrors(prev => ({ ...prev, general: 'Authentication failed. Please try again.' }));
+        
+        // Handle different error scenarios
+        let errorMessage = 'Authentication failed. Please try again.';
+        
+        if (error.message && error.message.includes('NetworkError')) {
+          errorMessage = 'Network error. Please check your internet connection and server status.';
+        } else if (error.message && error.message.includes('Failed to fetch')) {
+          errorMessage = 'Server connection error. Please ensure the backend server is running.';
+        }
+        
+        setErrors(prev => ({ ...prev, general: errorMessage }));
       }
     }
   };

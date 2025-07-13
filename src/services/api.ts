@@ -2,23 +2,48 @@ import axios from 'axios';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api';
 
+// Helper function to safely access localStorage (avoid SSR issues)
+const getLocalStorage = (key: string): string | null => {
+  if (typeof window !== 'undefined') {
+    return localStorage.getItem(key);
+  }
+  return null;
+};
+
+const setLocalStorage = (key: string, value: string): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(key, value);
+  }
+};
+
+const removeLocalStorage = (key: string): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem(key);
+  }
+};
+
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     'Content-Type': 'application/json'
-  }
+  },
+  // Add timeout to prevent hanging requests
+  timeout: 10000,
+  // Enable credentials for CORS
+  withCredentials: true
 });
 
 // Add token to requests if available
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = getLocalStorage('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
   (error) => {
+    console.error('Request interceptor error:', error);
     return Promise.reject(error);
   }
 );
@@ -28,9 +53,11 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/signin';
+      removeLocalStorage('token');
+      removeLocalStorage('user');
+      if (typeof window !== 'undefined') {
+        window.location.href = '/signin';
+      }
     }
     return Promise.reject(error);
   }
@@ -39,32 +66,93 @@ api.interceptors.response.use(
 // Auth services
 export const authService = {
   register: async (userData: any) => {
-    const response = await api.post('/auth/register', userData);
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+    try {
+      const response = await api.post('/auth/register', userData);
+      const data = response.data;
+      if (data.token) {
+        setLocalStorage('token', data.token);
+        setLocalStorage('user', JSON.stringify(data.user));
+      }
+      return data;
+    } catch (error) {
+      console.error("Registration error:", error);
+      
+      if (error.code === 'ECONNABORTED') {
+        return {
+          success: false,
+          message: 'Connection timeout. Please check your internet connection.'
+        };
+      }
+      
+      if (!error.response) {
+        return {
+          success: false,
+          message: 'Network error. Please check if the server is running.'
+        };
+      }
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Registration failed'
+      };
     }
-    return response.data;
   },
   
   login: async (email: string, password: string) => {
-    const response = await api.post('/auth/login', { email, password });
-    if (response.data.token) {
-      localStorage.setItem('token', response.data.token);
-      localStorage.setItem('user', JSON.stringify(response.data.user));
+    try {
+      console.log('Attempting login with:', { email, password: '********' });
+      console.log('API URL:', API_URL);
+      
+      const response = await api.post('/auth/login', { email, password });
+      console.log('Login response received:', response.status);
+      
+      const data = response.data;
+      if (data.token) {
+        setLocalStorage('token', data.token);
+        setLocalStorage('user', JSON.stringify(data.user));
+        console.log('User authenticated successfully');
+      }
+      return data;
+    } catch (error) {
+      console.error("Login error details:", error);
+      
+      // Network or connection errors
+      if (error.code === 'ECONNABORTED') {
+        return {
+          success: false,
+          message: 'Connection timeout. Please check your internet connection.'
+        };
+      }
+      
+      if (!error.response) {
+        return {
+          success: false,
+          message: 'Network error. Please check if the server is running.'
+        };
+      }
+      
+      // Server responded with error
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Login failed'
+      };
     }
-    return response.data;
   },
   
   logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
+    removeLocalStorage('token');
+    removeLocalStorage('user');
   },
   
   getCurrentUser: () => {
-    const userStr = localStorage.getItem('user');
+    const userStr = getLocalStorage('user');
     if (userStr) {
-      return JSON.parse(userStr);
+      try {
+        return JSON.parse(userStr);
+      } catch (e) {
+        console.error('Error parsing user from localStorage', e);
+        return null;
+      }
     }
     return null;
   }
@@ -218,7 +306,7 @@ export const cartService = {
     }
   },
   
-  removeCartItem: async (productId: string) => {
+  removeFromCart: async (productId: string) => {
     try {
       const response = await api.delete(`/cart/${productId}`);
       return {
@@ -276,6 +364,93 @@ export const userService = {
   deleteUser: async (userId: string) => {
     const response = await api.delete(`/users/${userId}`);
     return response.data;
+  }
+};
+
+// Order services
+export const orderService = {
+  getAllOrders: async () => {
+    try {
+      const response = await api.get('/orders');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to fetch orders'
+      };
+    }
+  },
+  
+  getOrder: async (id: string) => {
+    try {
+      const response = await api.get(`/orders/${id}`);
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching order:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to fetch order'
+      };
+    }
+  },
+  
+  createOrder: async (orderData: {
+    deliveryAddress: {
+      street: string;
+      city: string;
+      state: string;
+      zipCode: string;
+      country: string;
+    };
+    phoneNumber: string;
+    items?: { product: string; quantity: number }[];
+  }) => {
+    try {
+      const response = await api.post('/orders', orderData);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error creating order:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to create order'
+      };
+    }
+  },
+  
+  updateOrderStatus: async (id: string, status: string, note?: string) => {
+    try {
+      const response = await api.patch(`/orders/${id}/status`, { status, note });
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to update order status'
+      };
+    }
+  },
+  
+  deleteOrder: async (id: string) => {
+    try {
+      const response = await api.delete(`/orders/${id}`);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to delete order'
+      };
+    }
   }
 };
 
